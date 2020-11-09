@@ -1,6 +1,6 @@
 #!/bin/bash
 
-python3 -u ../run_ppo2.py \
+python3 -u run_ppo2.py \
     --level 11_vs_11_easy_stochastic \
     --state extracted_stacked \
     --reward_experiment scoring,checkpoints \
