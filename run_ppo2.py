@@ -1,127 +1,100 @@
-# coding=utf-8
-# Copyright 2019 Google LLC
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Runs football_env on OpenAI's ppo2."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
-import multiprocessing
-import os
-from absl import app
-from absl import flags
-from baselines import logger
-from baselines.bench import monitor
-from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
-from baselines.ppo2 import ppo2
-import gfootball.env as football_env
-from gfootball.examples import models  
 
 
-FLAGS = flags.FLAGS
+import os, sys
+import numpy as np
+import argparse
+from stable_baselines3 import PPO
 
-flags.DEFINE_string('level', 'academy_empty_goal_close',
-                    'Defines type of problem being solved')
-flags.DEFINE_enum('state', 'extracted_stacked', ['extracted',
-                                                 'extracted_stacked'],
-                  'Observation to be used for training.')
-flags.DEFINE_enum('reward_experiment', 'scoring',
-                  ['scoring', 'scoring,checkpoints'],
-                  'Reward to be used for training.')
-flags.DEFINE_enum('policy', 'cnn', ['cnn', 'lstm', 'mlp', 'impala_cnn',
-                                    'gfootball_impala_cnn'],
-                  'Policy architecture')
-flags.DEFINE_integer('num_timesteps', int(3e6),
-                     'Number of timesteps to run for.')
-flags.DEFINE_integer('num_envs', 8,
-                     'Number of environments to run in parallel.')
-flags.DEFINE_integer('nsteps', 128, 'Number of environment steps per epoch; '
-                     'batch size is nsteps * nenv')
-flags.DEFINE_integer('noptepochs', 4, 'Number of updates per epoch.')
-flags.DEFINE_integer('nminibatches', 8,
-                     'Number of minibatches to split one epoch to.')
-flags.DEFINE_integer('save_interval', 100,
-                     'How frequently checkpoints are saved.')
-flags.DEFINE_integer('seed', 0, 'Random seed.')
-flags.DEFINE_float('lr', 0.00008, 'Learning rate')
-flags.DEFINE_float('ent_coef', 0.01, 'Entropy coeficient')
-flags.DEFINE_float('gamma', 0.993, 'Discount factor')
-flags.DEFINE_float('cliprange', 0.27, 'Clip range')
-flags.DEFINE_float('max_grad_norm', 0.5, 'Max gradient norm (clipping)')
-flags.DEFINE_bool('render', False, 'If True, environment rendering is enabled.')
-flags.DEFINE_bool('dump_full_episodes', False,
-                  'If True, trace is dumped after every episode.')
-flags.DEFINE_bool('dump_scores', False,
-                  'If True, sampled traces after scoring are dumped.')
-flags.DEFINE_string('load_path', None, 'Path to load initial checkpoint from.')
-flags.DEFINE_string('save_path', None, 'Path to save checkpoints.')
+CUR_DIR = 
+sys.path.append(CUR_DIR)
+
+# environment
+# import customized environment wrapper
+from env_wrapper import gfootballenv
+
+# policy/value networks
+from stable_baselines3.ppo import mlppolicy
+from stable_baselines3.common.policies import actorcriticpolicy
+# import customized policy/value network
 
 
-def create_single_football_env(iprocess):
-  """Creates gfootball environment."""
-  env = football_env.create_environment(
-      env_name=FLAGS.level, stacked=('stacked' in FLAGS.state),
-      rewards=FLAGS.reward_experiment,
-      logdir=logger.get_dir(),
-      write_goal_dumps=FLAGS.dump_scores and (iprocess == 0),
-      write_full_episode_dumps=FLAGS.dump_full_episodes and (iprocess == 0),
-      render=FLAGS.render and (iprocess == 0),
-      dump_frequency=50 if FLAGS.render and iprocess == 0 else 0)
-  env = monitor.Monitor(env, logger.get_dir() and os.path.join(logger.get_dir(),
-                                                               str(iprocess)))
-  return env
+# environment parameters
+env_parser = argparse.ArgumentParser(description='enviorment parameters')
+env_parser.add_argument('--level', default='academy_empty_goal_close',
+        help='Defines type of problem being solved')
+env_parser.add_argument('--state', default='extracted_stacked', 
+        help='Observation to be used for training.')
+env_parser.add_argument('--reward_experiment', default='scoring',
+        help='Reward to be used for training.')
+
+# policy parameters
+policy_parser = argparse.ArgumentParser(description='policy parameters')
+policy_parser.add_argument('--policy', default='ActorCriticPolicy',
+        help='Policy architecture')
+
+# training parameters
+opt_parser = argparse.ArgumentParser(description='training parameters')
+opt_parser.add_argument('--num_timesteps', default=3e6,
+        help='Number of timesteps to run for.')
+opt_parser.add_argument('--num_envs', default=4,
+        help='Number of environments to run in parallel.')
+opt_parser.add_argument('--seed', default=0, 
+        help='Random seed.')
+opt_parser.add_argument('--lr', default=0.00008, 
+        help='Learning rate')
+opt_parser.add_argument('--ent_coef', default=0.01,
+        help='Entropy coeficient')
+opt_parser.add_argument('--vf_coef', default=0.5,
+        help='Value loss coeficient')
+opt_parser.add_argument('--gamma', default=0.993, 
+        help='Discount factor')
+opt_parser.add_argument('--clip_range', default=0.27, 
+        help='Clip range')
+opt_parser.add_argument('--max_grad_norm', default=0.5, 
+        help='Max gradient norm (clipping)')
+opt_parser.add_argument('--n_steps', default=128, 
+        help='Number of environment steps per epoch; ''batch size is nsteps * nenv')
+opt_parser.add_argument('--n_epochs', default=10, 
+        help='Number of updates per epoch.')
+opt_parser.add_argument('--save_interval', default=100,
+        help='How frequently checkpoints are saved.')
+
+opt_parser.add_argument('--load_path', default='./outputs', 
+        help='Path to load initial checkpoint from.')
+opt_parser.add_argument('--save_path', default='./outputs', 
+        help='Path to save checkpoints.')
 
 
-def train(_):
-  """Trains a PPO2 policy."""
+def train():
+    """Trains a PPO2 policy."""
 
-  import os
-  os.environ['OPENAI_LOGDIR'] = FLAGS.save_path
-  os.environ['OPENAI_LOG_FORMAT']= 'stdout,tensorboard'
+    env_args = env_parser.parse_known_args()
+    policy_args = policy_parser.parse_known_args()
+    opt_args = opt_parser.parse_known_args()
 
-  vec_env = SubprocVecEnv([
-      (lambda _i=i: create_single_football_env(_i))
-      for i in range(FLAGS.num_envs)
-  ], context=None)
 
-  # Import tensorflow after we create environments. TF is not fork sake, and
-  # we could be using TF as part of environment if one of the players is
-  # controled by an already trained model.
-  import tensorflow.compat.v1 as tf
-  ncpu = multiprocessing.cpu_count()
-  config = tf.ConfigProto(allow_soft_placement=True,
-                          intra_op_parallelism_threads=ncpu,
-                          inter_op_parallelism_threads=ncpu)
-  config.gpu_options.allow_growth = True
-  tf.Session(config=config).__enter__()
+    # TODO: flexible parameter
+    env = GFootballEnv(env_args)
+    eval_env = GFootballEnv(env_args) # for evaluation
 
-  ppo2.learn(network=FLAGS.policy,
-             total_timesteps=FLAGS.num_timesteps,
-             env=vec_env,
-             seed=FLAGS.seed,
-             nsteps=FLAGS.nsteps,
-             nminibatches=FLAGS.nminibatches,
-             noptepochs=FLAGS.noptepochs,
-             max_grad_norm=FLAGS.max_grad_norm,
-             gamma=FLAGS.gamma,
-             ent_coef=FLAGS.ent_coef,
-             lr=FLAGS.lr,
-             log_interval=1,
-             save_interval=FLAGS.save_interval,
-             cliprange=FLAGS.cliprange,
-             load_path=FLAGS.load_path)
+    # define rl policy/value network
+    policy = policy_args.policy
+    
+    # initialize ppo
+    tb_dir = op.path.join(opt_args.save_path, "tensorboard")
+    os.makedirs(tb_dir, exist_ok=True)
+    verbose = 1
+    ppo = PPO(policy, env, learning_rate=opt_args.lr, n_steps=opt_args.n_steps, n_epochs=opt_args.n_epochs, 
+            gamma=opt_args.gamma, gae_lambda=0.95, clip_range=args.clip_range, clip_range_vf=None, 
+            ent_coef=opt_args.ent_coef, vf_coef=opt_args.vf_coef, max_grad_norm=opt_args.max_grad_norm, 
+            tensorboard_log=tb_dir, verbose=verbose, seed=opt_args.seed)
+
+    # start training ppo
+    eval_dir = op.path.join(opt_args.save_path, "eval")
+    os.makedirs(eval_dir, exist_ok=True)
+    ppo.learn(opt_args.num_timesteps, log_interval=1, tb_log_name='PPO',
+            eval_env=eval_env, eval_freq=opt_parser.save_interval, n_eval_episodes=10, eval_log_path=eval_dir)
 
 
 if __name__ == '__main__':
-  app.run(train)
+    train()
