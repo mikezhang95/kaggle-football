@@ -16,7 +16,7 @@ level = "11_vs_11_easy_stochastic"
 state_representation = "extracted_stacked"
 reward_experiment = "scoring,checkpoints"
 network = "impala_cnn"
-load_path = "checkpoint"
+load_path = "/kaggle_simulations/agent/checkpoint"
 
 
 # initialize an environment to create agent
