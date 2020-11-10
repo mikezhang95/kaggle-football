@@ -1,7 +1,7 @@
 
 import sys
+
 sys.path.append('/kaggle_simulations/agent/')
-# sys.path.append('./')
 import os
 os.environ['CUDA_DEVCIE_ORDER'] = "PCR_BUS_ID"
 os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
@@ -12,7 +12,6 @@ from stable_baselines3.common.policies import ActorCriticPolicy
 from env_wrapper import GFootballEnv
 
 load_dir = "/kaggle_simulations/agent/ppo_gfootball.pt"
-# load_dir = "ppo_gfootball.pt"
 class EnvArgs(object):
     level = '11_vs_11_easy_stochastic'
     state = 'extracted_stacked'
@@ -28,7 +27,7 @@ policy = ActorCriticPolicy
 
 # agent
 model = PPO(policy, eval_env)
-model.load(load_dir)
+model.load(load_dir,device="cpu")
 print("Agent loaded.")
 
 # almost same as env_wrapper/gfootball.py when state="extracted_stacked"
@@ -37,10 +36,8 @@ def transform_obs(raw_obs):
     obs = eval_env._transform_obs(obs)
     return obs
 
-
 # main function for agent
 def agent(raw_obs):
     obs = transform_obs(raw_obs)
-    action = model.predict(obs, deterministic=True)
-    return [action] 
-
+    action, state = model.predict(obs, deterministic=True)
+    return [int(action)]
