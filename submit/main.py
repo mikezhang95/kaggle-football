@@ -49,7 +49,7 @@ if __name__ == "__main__":
     obs = eval_env.reset()
     for i in range(5):
         action, state = model.predict(obs, deterministic=True)
-        obs, reward, done, info = eval_env.step([int(action)])
+        obs, reward, done, info = eval_env.step(int(action))
         print(i, action, obs.shape, reward)
     print("Done")
 
