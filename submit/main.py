@@ -41,3 +41,20 @@ def agent(raw_obs):
     obs = transform_obs(raw_obs)
     action, state = model.predict(obs, deterministic=True)
     return [int(action)]
+
+
+if __name__ == "__main__":
+
+    # test
+    obs = eval_env.reset()
+    for i in range(5):
+        action, state = model.predict(obs, deterministic=True)
+        obs, reward, done, info = eval_env.step([int(action)])
+        print(i, action, obs.shape, reward)
+    print("Done")
+
+
+
+
+
+
