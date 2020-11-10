@@ -1,43 +1,43 @@
 
-import numpy as np
+import sys
+# sys.path.append('/kaggle_simulations/agent/')
+sys.path.append('./')
+
+from stable_baselines3 import PPO
 from stable_baselines3.common.policies import ActorCriticPolicy
+
 from env_wrapper import GFootballEnv
 
-
-load_dir = "/kaggle_simulations/agent/ppo_gfootball.pt"
+# load_dir = "/kaggle_simulations/agent/ppo_gfootball.pt"
+load_dir = "ppo_gfootball.pt"
 class EnvArgs(object):
-    level = 'academy_empty_goal_clos'
-    state = 'extracted_stacekd'
+    level = '11_vs_11_easy_stochastic'
+    state = 'extracted_stacked'
     reward_experiment = 'scoring,checkpoints'
+
+# environment
 env_args = EnvArgs()
-
-
 eval_env = GFootballEnv(env_args) # for evaluation
+print("Environment created.")
+
+# policy
 policy = ActorCriticPolicy
 
+# agent
 model = PPO(policy, eval_env)
 model.load(load_dir)
+model.cpu()
+print("Agent loaded.")
 
-
-# same as env_wrapper/gfootball.py when state="extracted_stacked"
+# almost same as env_wrapper/gfootball.py when state="extracted_stacked"
 def transform_obs(raw_obs):
-
-    global obs_stack
-    obs = raw_obs['players_raw'][0]
-    obs = football_env.observation_preprocessing.generate_smm([obs])
-    if not obs_stack:
-        obs_stack.extend([obs] * 4)
-    else:
-        obs_stack.append(obs)
-
-    # stack observation to add time dependencies, only for pixels and extracted
-    obs = np.concatenate(list(obs_stack), axis=-1) # [72,96,4*4]
-    obs = np.squeeze(obs)
+    obs = raw_obs['players_raw']
+    obs = eval_env._transform_obs(obs)
     return obs
 
 
 # main function for agent
-def agent(obs):
+def agent(raw_obs):
     obs = transform_obs(raw_obs)
     action = model.predict(obs, deterministic=True)
     return [action] 
