@@ -1,2 +1,5 @@
+
+**/*.pyc
 outputs/
+env_wrapper/__pycache__/
 

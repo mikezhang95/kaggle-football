@@ -1,11 +1,14 @@
 
+import numpy as np
+from collections import deque
+
 import gfootball.env as football_env
 from env_wrapper import BaseEnv
 
 """
 Wrap google football environment. Set parameters from: 
     - level: e.x. 11_vs_11_easy_stochastic.py (full list: https://github.com/google-research/football/tree/master/gfootball/scenarios)
-    - representation: ['pixels', 'pixels_gray', 'extracted', 'simple115v2','raw']
+    - state: ['pixels', 'pixels_gray', 'extracted', 'simple115v2','raw']
     - reward_experiment: ['scoring', 'scoring,checkpoints']
 """
 
@@ -14,7 +17,8 @@ class GFootballEnv(BaseEnv):
     def __init__(self, args):
         super(GFootballEnv, self).__init__()
 
-        self.representation = args.representation
+        self.representation = args.state.split('_')[0]
+        self.stacked = 'stacked' in args.state
 
         # wrap the original environment
         # https://github.com/google-research/football/blob/master/gfootball/env/__init__.py
@@ -29,7 +33,7 @@ class GFootballEnv(BaseEnv):
         # this is for training environment
         self.real_env = football_env.create_environment(
             env_name=args.level,
-            stacked='stacked' in self.representation, # set to False to align with online evaluation
+            stacked=self.stacked, # set to False to align with online evaluation
             representation=self.representation,
             rewards=args.reward_experiment)
 
@@ -50,15 +54,15 @@ class GFootballEnv(BaseEnv):
 
         if "extracted" in self.representation:
             obs = raw_obs[0]
-            obs = observation_preprocessing.generate_smm([obs])
+            obs = football_env.observation_preprocessing.generate_smm([obs])
             if not self.obs_stack:
                 self.obs_stack.extend([obs] * 4)
             else:
                 self.obs_stack.append(obs)
 
         # stack observation to add time dependencies, only for pixels and extracted
-        if "stacked" in self.representation:
-            obs = np.concatenate(list(self.obs_stack), axis=-1)
+        if self.stacked:
+            obs = np.concatenate(list(self.obs_stack), axis=-1) # [72,96,4*4]
             obs = np.squeeze(obs)
         else:
             obs = np.array(list(self.obs_stack)[-1])

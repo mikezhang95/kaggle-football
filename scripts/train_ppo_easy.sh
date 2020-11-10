@@ -1,5 +1,8 @@
 #!/bin/bash
 
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+export CUDA_VISIBLE_DEVICES=-1
+
 python3 -u run_ppo2.py \
     --level 11_vs_11_easy_stochastic \
     --state extracted_stacked \
@@ -11,8 +14,8 @@ python3 -u run_ppo2.py \
     --gamma 0.993 \
     --clip_range 0.08 \
     --max_grad_norm 0.64 \
-    --num_timesteps 5e6 \
-    --num_envs 4 \
+    --num_timesteps 5000000 \
+    --num_envs 2 \
     --nsteps 512 \
     --n_epochs 10 \
     --save_interval 100 \
