@@ -81,6 +81,8 @@ def train():
     policy_args = policy_parser.parse_known_args()[0]
     opt_args = opt_parser.parse_known_args()[0]
 
+    os.makedirs(opt_args.save_path, exist_ok=True)
+
     # create environment
     # train_env = GFootballEnv(env_args) # for evaluation
     train_env = DummyVecEnv([make_env(env_args, opt_args.save_path, rank=i) for i in range(opt_args.num_envs)])

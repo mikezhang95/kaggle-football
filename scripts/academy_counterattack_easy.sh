@@ -1,10 +1,12 @@
 #!/bin/bash
 
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
-export CUDA_VISIBLE_DEVICES=-1
+export CUDA_VISIBLE_DEVICES=3
+
+LEVEL=academy_counterattack_easy
 
 python3 -u run_ppo2.py \
-    --level academy_counterattack_easy \
+    --level ${LEVEL} \
     --state extracted_stacked \
     --reward_experiment scoring,checkpoints \
     --policy ActorCriticPolicy \
@@ -20,4 +22,4 @@ python3 -u run_ppo2.py \
     --n_epochs 10 \
     --save_interval 1000 \
     --seed 0 \
-    --save_path ./outputs/academy_counterattack_easy \
+    --save_path ./outputs/${LEVEL} > ./outputs/${LEVEL}/train.log

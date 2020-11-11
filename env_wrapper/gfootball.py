@@ -72,7 +72,7 @@ class GFootballEnv(BaseEnv):
     def step(self, action):
         obs, reward, done, info = self.raw_env.step([action])
         obs = self._transform_obs(obs)
-        return obs, reward, done, info
+        return obs, float(reward), done, info
 
 
     def reset(self):
