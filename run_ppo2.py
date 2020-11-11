@@ -4,6 +4,8 @@ import os, sys
 import numpy as np
 import argparse
 from stable_baselines3 import PPO
+from stable_baselines3.common.env_checker import check_env
+from stable_baselines3.common.monitor import Monitor
 
 # environment
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
@@ -63,6 +65,15 @@ opt_parser.add_argument('--save_path', default='./outputs',
         help='Path to save checkpoints.')
 
 
+def make_env(args, rank=0):
+    def _init():
+        env = GFootballEnv(args)
+        log_file = os.path.join(".", str(rank))
+        env = Monitor(env, log_file, allow_early_resets=True)
+        return env
+    return _init
+
+
 def train():
     """Trains a PPO2 policy."""
 
@@ -70,11 +81,11 @@ def train():
     policy_args = policy_parser.parse_known_args()[0]
     opt_args = opt_parser.parse_known_args()[0]
 
-
-    # TODO: multi-process
-    # train_env = DummyVecEnv([GFootballEnv(env_args) for i in range(opt_args.num_envs)])
-    train_env = GFootballEnv(env_args) # for evaluation
+    # create environment
+    # train_env = GFootballEnv(env_args) # for evaluation
+    train_env = DummyVecEnv([make_env(env_args, rank=i) for i in range(opt_args.num_envs)])
     eval_env = GFootballEnv(env_args) # for evaluation
+    check_env(env=eval_env, warn=True)
 
     # define rl policy/value network
     policy = getattr(sys.modules[__name__], policy_args.policy)
@@ -95,11 +106,11 @@ def train():
     # start training ppo
     eval_dir = os.path.join(opt_args.save_path, "eval")
     os.makedirs(eval_dir, exist_ok=True)
-    ppo.learn(opt_args.num_timesteps, log_interval=1, tb_log_name='PPO',
+    ppo.learn(opt_args.num_timesteps, log_interval=1, 
             eval_env=eval_env, eval_freq=opt_args.save_interval, n_eval_episodes=10, eval_log_path=eval_dir)
 
     # save final checkpoint
-    ppo.save(os.path.join(opt_args.save_path, "ppo_gfootball.pt"))
+    ppo.save(os.path.join(opt_args.save_path, "ppo_gfootball"))
 
 
 if __name__ == '__main__':
