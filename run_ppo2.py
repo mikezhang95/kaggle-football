@@ -65,10 +65,10 @@ opt_parser.add_argument('--save_path', default='./outputs',
         help='Path to save checkpoints.')
 
 
-def make_env(args, rank=0):
+def make_env(args, save_path, rank=0):
     def _init():
         env = GFootballEnv(args)
-        log_file = os.path.join(".", str(rank))
+        log_file = os.path.join(save_path, "env_"+str(rank)+".log")
         env = Monitor(env, log_file, allow_early_resets=True)
         return env
     return _init
@@ -83,7 +83,7 @@ def train():
 
     # create environment
     # train_env = GFootballEnv(env_args) # for evaluation
-    train_env = DummyVecEnv([make_env(env_args, rank=i) for i in range(opt_args.num_envs)])
+    train_env = DummyVecEnv([make_env(env_args, opt_args.save_path, rank=i) for i in range(opt_args.num_envs)])
     eval_env = GFootballEnv(env_args) # for evaluation
     check_env(env=eval_env, warn=True)
 

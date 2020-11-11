@@ -18,6 +18,6 @@ python3 -u run_ppo2.py \
     --num_envs 2 \
     --nsteps 512 \
     --n_epochs 10 \
-    --save_interval 100 \
+    --save_interval 1000 \
     --seed 0 \
     --save_path ./outputs/academy_counterattack_easy \
