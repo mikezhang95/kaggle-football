@@ -33,9 +33,9 @@ parser.add_argument('--load_path', default=None,
         help='Path to load initial checkpoint from.')
 
 # eval parameters
-parser.add_argument('--n_epochs', default=10,
+parser.add_argument('--n_epochs', default=10, type=int,
         help='Num episodes for test.')
-parser.add_argument('--render', default=False,
+parser.add_argument('--render', action='store_true',
         help='Shows the simulations.')
 
 def make_env(args, save_path, rank=0):
@@ -58,19 +58,19 @@ def test():
     check_env(env=test_env, warn=True)
 
     # define rl policy/value network
-    policy = getattr(sys.modules[__name__], policy_args.policy)
+    policy = getattr(sys.modules[__name__], args.policy)
     
     # initialize ppo
-    model = PPO(policy, eval_env)
+    model = PPO(policy, test_env)
 
     # load initial checkpoint
-    if opt_args.load_path:
-        ppo.load(os.path.join(opt_args.load_path, "ppo_gfootball.pt"))
+    if args.load_path:
+        model.load(os.path.join(args.load_path, "ppo_gfootball.pt"))
 
     # test
     episode_rewards, episode_lengths = evaluate_policy(
             model,
-            eval_env,
+            test_env,
             n_eval_episodes=args.n_epochs,
             render=args.render,
             deterministic=True,
@@ -79,7 +79,7 @@ def test():
 
     mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
     mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(episode_lengths)
-    print(f"Eval epochs={args.n_Eval_episodes}, " f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
+    print(f"Eval epochs={args.n_epochs}, " f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
     print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
 
     print("\nDone")

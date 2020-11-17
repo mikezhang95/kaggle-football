@@ -14,4 +14,4 @@ python3 -u test_ppo2.py \
     --policy ActorCriticPolicy \
     --n_epochs 10 \
     --load_path ./outputs/${LEVEL} \
-    --render false 
+#     --render  
