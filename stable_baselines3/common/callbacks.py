@@ -363,7 +363,7 @@ class EvalCallback(EventCallback):
             self.logger.record("eval/mean_reward", float(mean_reward))
             self.logger.record("eval/mean_ep_length", mean_ep_length)
 
-            if mean_reward > self.best_mean_reward:
+            if mean_reward >= self.best_mean_reward:
                 if self.verbose > 0:
                     print("New best mean reward!")
                 if self.best_model_save_path is not None:

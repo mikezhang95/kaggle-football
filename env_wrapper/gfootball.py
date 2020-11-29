@@ -16,6 +16,10 @@ class GFootballEnv(BaseEnv):
     
     def __init__(self, args):
         super(GFootballEnv, self).__init__()
+        self.args = args
+        self.initialize(self.args)
+
+    def initialize(self, args):
 
         self.representation = args.state.split('_')[0]
         self.stacked = 'stacked' in args.state
@@ -72,10 +76,13 @@ class GFootballEnv(BaseEnv):
     def step(self, action):
         obs, reward, done, info = self.raw_env.step([action])
         obs = self._transform_obs(obs)
-        return obs, float(reward), done, info
+        reward = float(reward)
+        # reward -= 0.002 # time penalty
+        return obs, reward, done, info
 
 
     def reset(self):
+        # rebuild the scenario to random initialize position
         self.obs_stack.clear()
         obs = self.raw_env.reset()
         obs = self._transform_obs(obs)

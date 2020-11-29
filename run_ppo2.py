@@ -109,7 +109,7 @@ def train():
     eval_dir = os.path.join(opt_args.save_path, "eval")
     os.makedirs(eval_dir, exist_ok=True)
     ppo.learn(opt_args.num_timesteps, log_interval=1, 
-            eval_env=eval_env, eval_freq=opt_args.save_interval, n_eval_episodes=10, eval_log_path=eval_dir)
+            eval_env=eval_env, eval_freq=opt_args.save_interval, n_eval_episodes=50, eval_log_path=eval_dir)
 
     # save final checkpoint
     ppo.save(os.path.join(opt_args.save_path, "ppo_gfootball"))

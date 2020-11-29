@@ -65,7 +65,9 @@ def test():
 
     # load initial checkpoint
     if args.load_path:
-        model.load(os.path.join(args.load_path, "ppo_gfootball.pt"))
+        # model.load(os.path.join(args.load_path, "ppo_gfootball"))
+        model = PPO.load(os.path.join(args.load_path, "ppo_gfootball"))
+        print("Load model from {}.".format(args.load_path))
 
     # test
     episode_rewards, episode_lengths = evaluate_policy(
