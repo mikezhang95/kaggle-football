@@ -13,10 +13,57 @@ class Action(Enum):
     Dribble = 17 ReleaseDribble = 18
 """
 
+import sys, os
+# base_dir = '/kaggle_simulations/agent/'
+base_dir = './submit/'
+sys.path.append(base_dir)
+
+os.environ['CUDA_DEVCIE_ORDER'] = "PCR_BUS_ID"
+os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
+from stable_baselines3 import PPO
+from env_wrapper import GFootballEnv
+
+# environment
+class EnvArgs(object):
+    level = '11_vs_11_easy_stochastic'
+    state = 'extracted_stacked'
+    reward_experiment = 'scoring'
+env_args = EnvArgs()
+eval_env = GFootballEnv(env_args) # for evaluation
+print("Environment created.")
+
+# almost same as env_wrapper/gfootball.py when state="extracted_stacked"
+def transform_obs(raw_obs):
+    obs = raw_obs['players_raw']
+    obs = eval_env._transform_obs(obs)
+    return obs
+
+# shoot agent
+shoot_model_dir = base_dir + "shoot_model"
+shoot_model = PPO.load(shoot_model_dir,device="cpu")
+print("Agent loaded.")
+
 from kaggle_environments.envs.football.helpers import *
 import math
 import random
 
+action_list = [a for a in Action]
+def human_readable_obs(obs):
+    # Extract observations for the first (and only) player we control.
+    obs = obs['players_raw'][0]
+    # Turn 'sticky_actions' into a set of active actions (strongly typed).
+    obs['sticky_actions'] = { sticky_index_to_action[nr] for nr, action in enumerate(obs['sticky_actions']) if action }
+    # Turn 'game_mode' into an enum.
+    obs['game_mode'] = GameMode(obs['game_mode'])
+    # In case of single agent mode, 'designated' is always equal to 'active'.
+    if 'designated' in obs:
+        del obs['designated']
+    # Conver players' roles to enum.
+    obs['left_team_roles'] = [ PlayerRole(role) for role in obs['left_team_roles'] ]
+    obs['right_team_roles'] = [ PlayerRole(role) for role in obs['right_team_roles'] ]
+    return obs
+    
+    
 def find_patterns(obs, player_x, player_y):
     """ find list of appropriate patterns in groups of memory patterns """
     for get_group in groups_of_memory_patterns:
@@ -110,19 +157,25 @@ def close_to_goalkeeper_shot(obs, player_x, player_y):
         
     def get_action(obs, player_x, player_y):
         """ get action of this memory pattern """
-        if player_y <= -0.05 or (player_y > 0 and player_y < 0.05):
-            action_to_release = get_active_sticky_action(obs, ["bottom_right", "sprint"])
-            if action_to_release != None:
-                return action_to_release
-            if Action.BottomRight not in obs["sticky_actions"]:
-                return Action.BottomRight
-        else:
-            action_to_release = get_active_sticky_action(obs, ["top_right", "sprint"])
-            if action_to_release != None:
-                return action_to_release
-            if Action.TopRight not in obs["sticky_actions"]:
-                return Action.TopRight
-        return Action.Shot
+        # rl action
+        rl_obs = obs["rl_obs"]
+        action, state = shoot_model.predict(rl_obs, deterministic=True)
+        return action_list[int(action)]
+    
+#         # rule action
+#         if player_y <= -0.05 or (player_y > 0 and player_y < 0.05):
+#             action_to_release = get_active_sticky_action(obs, ["bottom_right", "sprint"])
+#             if action_to_release != None:
+#                 return action_to_release
+#             if Action.BottomRight not in obs["sticky_actions"]:
+#                 return Action.BottomRight
+#         else:
+#             action_to_release = get_active_sticky_action(obs, ["top_right", "sprint"])
+#             if action_to_release != None:
+#                 return action_to_release
+#             if Action.TopRight not in obs["sticky_actions"]:
+#                 return Action.TopRight
+#         return Action.Shot
     
     return {"environment_fits": environment_fits, "get_action": get_action}
 
@@ -691,9 +744,16 @@ sticky_actions = {
 #    when a single player is controlled on the team.
 # - 'left_team_roles'/'right_team_roles' are turned into PlayerRole enums.
 # - Action enum is to be returned by the agent function.
-@human_readable_agent
-def agent(obs):
+# @human_readable_agent
+
+def agent(raw_obs):
     """ Ole ole ole ole """
+    # rule observation
+    obs = human_readable_obs(raw_obs)
+    # rl observation
+    rl_obs = transform_obs(raw_obs)
+    obs["rl_obs"] = rl_obs
+    
     # shift positions of opponent team players
     for i in range(len(obs["right_team"])):
         obs["right_team"][i][0] += obs["right_team_direction"][i][0]
@@ -711,6 +771,6 @@ def agent(obs):
     # get action of appropriate pattern in agent's memory
     action = get_action(obs, controlled_player_pos[0], controlled_player_pos[1])
     # return action
-    return action
+    return [action.value]
 
     

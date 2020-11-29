@@ -1,33 +1,33 @@
 
-import sys
+import sys, os
 
-sys.path.append('/kaggle_simulations/agent/')
-import os
+sys.path.append('./submit/')
 os.environ['CUDA_DEVCIE_ORDER'] = "PCR_BUS_ID"
 os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.policies import ActorCriticPolicy
-
 from env_wrapper import GFootballEnv
 
-load_dir = "/kaggle_simulations/agent/ppo_gfootball.pt"
+
+# LEVEL = "academy_empty_goal_close"
+# LEVEL = "academy_pass_and_shoot_with_keeper"
+# LEVEL = "academy_counterattack_easy"
+LEVEL = "academy_shoot_with_keeper"
+
+load_dir = "./outputs/{}/ppo_gfootball".format(LEVEL)
+
 class EnvArgs(object):
-    level = '11_vs_11_easy_stochastic'
+    level = LEVEL
     state = 'extracted_stacked'
-    reward_experiment = 'scoring,checkpoints'
+    reward_experiment = 'scoring'
 
 # environment
 env_args = EnvArgs()
 eval_env = GFootballEnv(env_args) # for evaluation
 print("Environment created.")
 
-# policy
-policy = ActorCriticPolicy
-
 # agent
-model = PPO(policy, eval_env)
-model.load(load_dir,device="cpu")
+model = PPO.load(load_dir,device="cpu")
 print("Agent loaded.")
 
 # almost same as env_wrapper/gfootball.py when state="extracted_stacked"
@@ -44,17 +44,12 @@ def agent(raw_obs):
 
 
 if __name__ == "__main__":
-
     # test
     obs = eval_env.reset()
-    for i in range(5):
+    done, i= False, 0
+    while not done:
         action, state = model.predict(obs, deterministic=True)
         obs, reward, done, info = eval_env.step(int(action))
         print(i, action, obs.shape, reward)
+        i += 1
     print("Done")
-
-
-
-
-
-
