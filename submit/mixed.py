@@ -43,6 +43,10 @@ shoot_model = PPO.load(shoot_model_dir,device="cpu")
 print("Agent loaded.")
 
 # defense agent
+defense_model_dir = base_dir + "defense_model"
+defense_model = PPO.load(defense_model_dir,device="cpu")
+print("Agent loaded.")
+
 #################
 
 
@@ -478,8 +482,29 @@ def run_to_ball_top_right(obs, player_x, player_y):
         if Action.Sprint not in obs["sticky_actions"]:
             return Action.Sprint
         return Action.TopRight  
-    return {"environment_fits": environment_fits, "get_action": get_action}        
-     
+    return {"environment_fits": environment_fits, "get_action": get_action}     
+
+
+def tackle_the_ball(obs, player_x, player_y):
+    """ shot if close to the goalkeeper """
+    def environment_fits(obs, player_x, player_y):
+        """ environment fits constraints """
+        if ( abs(obs["memory_patterns"]["ball_next_coords"]["y"] - player_y) < 0.1 and
+                abs(obs["memory_patterns"]["ball_next_coords"]["x"] - player_x) < 0.1 ):
+            return True
+        return False
+        
+    def get_action(obs, player_x, player_y):
+        """ get action of this memory pattern """
+        # rl defense: mask other irrelevant agents 
+        raw_obs = obs["raw_obs"]     
+        rl_obs = transform_obs(raw_obs)
+        action, state = defense_model.predict(rl_obs, deterministic=True)
+        return action_list[int(action)]
+           
+    return {"environment_fits": environment_fits, "get_action": get_action}
+
+
  
 def idle(obs, player_x, player_y):
     """ do nothing, stickly actions are not affected (player maintains his directional movement etc.) """
@@ -691,6 +716,7 @@ def defence_memory_patterns(obs, player_x, player_y):
 #            }
         
         memory_patterns = [
+            tackle_the_ball,
             run_to_ball_right,
             run_to_ball_left,
             run_to_ball_bottom,
