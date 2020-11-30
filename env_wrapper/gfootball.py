@@ -58,6 +58,9 @@ class GFootballEnv(BaseEnv):
 
         if "extracted" in self.representation:
             obs = raw_obs[0]
+            # YZ: mask left team GK
+            obs["left_team"][0][0] = -1.0
+            obs["left_team"][0][1] = 0.0
             obs = football_env.observation_preprocessing.generate_smm([obs])
             if not self.obs_stack:
                 self.obs_stack.extend([obs] * 4)
@@ -75,9 +78,8 @@ class GFootballEnv(BaseEnv):
 
     def step(self, action):
         obs, reward, done, info = self.raw_env.step([action])
-        obs = self._transform_obs(obs)
         reward = float(reward)
-        # reward -= 0.002 # time penalty
+        obs = self._transform_obs(obs)
         return obs, reward, done, info
 
 

@@ -1,8 +1,11 @@
 """
 TODO
-   1. 距离球的距离很近的时候，减速前进，可以用RL
-   2. 射门精度问题，可以用RL
-   3. 进攻的时候通过回传吸引对方的防守，扩大自己的空间
+   1. 距离球的距离很近的时候，用球的位置而不是下一个位置作为目标
+   2. 射门精度问题
+   3. 下底传中，直接头球射门
+      - @result: 不能头球射门，但是没有延误战机
+   4. 进攻的时候增加长传
+      - 确实有长传调度了
    
 
 class Action(Enum):
@@ -12,40 +15,33 @@ class Action(Enum):
     Sprint = 13 ReleaseDirection = 14 ReleaseSprint = 15 Slide = 16
     Dribble = 17 ReleaseDribble = 18
 """
-
-import sys, os
-# base_dir = '/kaggle_simulations/agent/'
-base_dir = './submit/'
-sys.path.append(base_dir)
-
-os.environ['CUDA_DEVCIE_ORDER'] = "PCR_BUS_ID"
-os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
-from stable_baselines3 import PPO
-from env_wrapper import GFootballEnv
-
-# environment
-class EnvArgs(object):
-    level = '11_vs_11_easy_stochastic'
-    state = 'extracted_stacked'
-    reward_experiment = 'scoring'
-env_args = EnvArgs()
-eval_env = GFootballEnv(env_args) # for evaluation
-print("Environment created.")
-
-# almost same as env_wrapper/gfootball.py when state="extracted_stacked"
-def transform_obs(raw_obs):
-    obs = raw_obs['players_raw']
-    obs = eval_env._transform_obs(obs)
-    return obs
-
-# shoot agent
-shoot_model_dir = base_dir + "shoot_model"
-shoot_model = PPO.load(shoot_model_dir,device="cpu")
-print("Agent loaded.")
-
 from kaggle_environments.envs.football.helpers import *
 import math
 import random
+import numpy as np
+
+# side long pass 下底传中
+high_pass_state = False   
+def high_pass_action(obs, player_x, player_y):
+    
+    global high_pass_state
+
+    # 球已经传出来了，准备射门
+    if high_pass_state and obs["ball_owned_team"] in [0, -1] :  
+        return Action.Shot
+
+    # 准备传球
+    action_to_release = get_active_sticky_action(obs, ["top", "bottom"])
+    if action_to_release != None:
+        return action_to_release
+    if Action.Top not in obs["sticky_actions"] and Action.Bottom not in obs["sticky_actions"]:
+        if player_y > 0:
+            return Action.Top
+        else:
+            return Action.Bottom
+    high_pass_state = True
+    return Action.HighPass
+
 
 action_list = [a for a in Action]
 def human_readable_obs(obs):
@@ -110,36 +106,87 @@ def get_average_distance_to_opponents(obs, player_x, player_y):
         return 2, distances_amount
     return distances_sum / distances_amount, distances_amount
 
+def get_far_teamate(obs, player_x, player_y):
+    """get farthest teamte so we can make a high pass"""
+    
+    max_d = [0, 0, 0, 0, 0] # right, topright, bottomright
+    
+    for i in range(1, len(obs["left_team"])):
+        if i == obs["active"]: continue
+        if obs["left_team"][i][0] < player_x - 0.1: continue
+            
+        diff_x = obs["left_team"][i][0] - player_x
+        diff_y = (obs["left_team"][i][1] - player_y) * 2.38
+        
+        # 1. right direction
+        if abs(diff_y) < 0.05 * abs(diff_x): 
+            distance = get_distance(player_x, player_y, obs["left_team"][i][0], obs["left_team"][i][1])
+            if distance > max_d[0]:
+                max_d[0] = distance
+            continue
+
+        ratio  = abs(diff_y) / (diff_x + 0.001)
+        if ratio > 0.9 and ratio < 1.1 :
+            distance = get_distance(player_x, player_y, obs["left_team"][i][0], obs["left_team"][i][1])  
+            # 4. right up
+            if diff_y > 0 and distance > max_d[1]:
+                max_d[1] = distance
+            # 5. right bottom
+            elif diff_y < 0 and distance > max_d[2]:
+                max_d[2] = distance
+            continue 
+                   
+        if abs(diff_x) < 0.03 * diff_y: 
+            distance = get_distance(player_x, player_y, obs["left_team"][i][0], obs["left_team"][i][1])
+            # 2. up direction
+            if diff_y > 0 and distance > max_d[3]:
+                max_d[3] = distance          
+            # 3. bottom direction
+            elif diff_y < 0 and distance > max_d[4]:
+                max_d[4] = distance            
+            continue 
+            
+    # go directly long pass
+    if player_x >= 0.0 :
+        thres = [0.5, 0.8, 0.8, 1.1, 1.1]
+    else:
+        thres = [0.4, 0.4, 0.4, 1.0, 1.0] 
+    for i in range(5):
+        if max_d[i] < thres[i]:
+            max_d[i] = 0.0
+    d_id = np.argmax(max_d) 
+    direction_set = [Action.Right, Action.TopRight, Action.BottomRight, Action.Top, Action.Bottom]
+    if max_d[d_id] == 0:
+        if player_x < 0.0:
+            obs["high_pass_direction"] = direction_set[0] # the safest direction: right
+        else:
+            obs["high_pass_direction"] = None
+    else:
+        obs["high_pass_direction"] = direction_set[d_id]
+        
 def get_distance(x1, y1, x2, y2):
     """ get two-dimensional Euclidean distance, considering y size of the field """
     return math.sqrt((x1 - x2) ** 2 + (y1 * 2.38 - y2 * 2.38) ** 2)
 
 ############# 进攻 ###############
 
+# 下底传中
 def bad_angle_high_pass(obs, player_x, player_y):
     """ perform a high pass, if player is at bad angle to opponent's goal """
     def environment_fits(obs, player_x, player_y):
         """ environment fits constraints """
         # player have the ball and is at bad angle to opponent's goal
-        if (obs["ball_owned_player"] == obs["active"] and
+        if high_pass_state or  (obs["ball_owned_player"] == obs["active"] and
                 obs["ball_owned_team"] == 0 and
-                abs(player_y) > 0.15 and
+                abs(player_y) > 0.2 and
                 player_x > 0.8):
             return True
         return False
         
     def get_action(obs, player_x, player_y):
         """ get action of this memory pattern """
-        action_to_release = get_active_sticky_action(obs, ["top", "bottom"])
-        if action_to_release != None:
-            return action_to_release
-        if Action.Top not in obs["sticky_actions"] and Action.Bottom not in obs["sticky_actions"]:
-            if player_y > 0:
-                return Action.Top
-            else:
-                return Action.Bottom
-        return Action.HighPass
-    
+        action = high_pass_action(obs, player_x, player_y)
+        return action
     return {"environment_fits": environment_fits, "get_action": get_action}
 
 def close_to_goalkeeper_shot(obs, player_x, player_y):
@@ -149,44 +196,35 @@ def close_to_goalkeeper_shot(obs, player_x, player_y):
         goalkeeper_x = obs["right_team"][0][0] + obs["right_team_direction"][0][0] * 13
         goalkeeper_y = obs["right_team"][0][1] + obs["right_team_direction"][0][1] * 13
         # player have the ball and located close to the goalkeeper
-        if (obs["ball_owned_player"] == obs["active"] and
-                obs["ball_owned_team"] == 0 and
-                get_distance(player_x, player_y, goalkeeper_x, goalkeeper_y) < 0.3):
+        if get_distance(player_x, player_y, goalkeeper_x, goalkeeper_y) < 0.3:
             return True
         return False
         
     def get_action(obs, player_x, player_y):
         """ get action of this memory pattern """
-        # rl action
-        rl_obs = obs["rl_obs"]
-        action, state = shoot_model.predict(rl_obs, deterministic=True)
-        return action_list[int(action)]
-    
-#         # rule action
-#         if player_y <= -0.05 or (player_y > 0 and player_y < 0.05):
-#             action_to_release = get_active_sticky_action(obs, ["bottom_right", "sprint"])
-#             if action_to_release != None:
-#                 return action_to_release
-#             if Action.BottomRight not in obs["sticky_actions"]:
-#                 return Action.BottomRight
-#         else:
-#             action_to_release = get_active_sticky_action(obs, ["top_right", "sprint"])
-#             if action_to_release != None:
-#                 return action_to_release
-#             if Action.TopRight not in obs["sticky_actions"]:
-#                 return Action.TopRight
-#         return Action.Shot
+        if player_y <= -0.05 or (player_y > 0 and player_y < 0.05):
+            action_to_release = get_active_sticky_action(obs, ["bottom_right", "sprint"])
+            if action_to_release != None:
+                return action_to_release
+            if Action.BottomRight not in obs["sticky_actions"]:
+                return Action.BottomRight
+        else:
+            action_to_release = get_active_sticky_action(obs, ["top_right", "sprint"])
+            if action_to_release != None:
+                return action_to_release
+            if Action.TopRight not in obs["sticky_actions"]:
+                return Action.TopRight
+        return Action.Shot
     
     return {"environment_fits": environment_fits, "get_action": get_action}
 
+# 解围
 def far_from_goal_shot(obs, player_x, player_y):
     """ perform a shot, if far from opponent's goal """
     def environment_fits(obs, player_x, player_y):
         """ environment fits constraints """
         # player have the ball and is far from opponent's goal
-        if (obs["ball_owned_player"] == obs["active"] and
-                obs["ball_owned_team"] == 0 and
-                (player_x < -0.6 or obs["ball_owned_player"] == 0)):
+        if player_x < -0.6 or obs["ball_owned_player"] == 0:
             return True
         return False
         
@@ -196,59 +234,54 @@ def far_from_goal_shot(obs, player_x, player_y):
     
     return {"environment_fits": environment_fits, "get_action": get_action}
 
-def far_from_goal_high_pass(obs, player_x, player_y):
-    """ perform a high pass, if far from opponent's goal """
-    def environment_fits(obs, player_x, player_y):
-        """ environment fits constraints """
-        # player have the ball and is far from opponent's goal
-        if (obs["ball_owned_player"] == obs["active"] and
-                obs["ball_owned_team"] == 0 and
-                (player_x < -0.3 or obs["ball_owned_player"] == 0)):
-            return True
-        return False
-        
-    def get_action(obs, player_x, player_y):
-        """ get action of this memory pattern """
-        action_to_release = get_active_sticky_action(obs, ["right", "sprint"])
-        if action_to_release != None:
-            return action_to_release
-        if Action.Right not in obs["sticky_actions"]:
-            return Action.Right
-        return Action.HighPass
-    
-    return {"environment_fits": environment_fits, "get_action": get_action}
 
+# 过人
 def go_through_opponents(obs, player_x, player_y):
     """ avoid closest opponents by going around them """
     def environment_fits(obs, player_x, player_y):
         """ environment fits constraints """
-        # right direction is safest
+
+        # dribble
+        # if right direction is safest
         biggest_distance, final_opponents_amount = get_average_distance_to_opponents(obs, player_x + 0.01, player_y)
         obs["memory_patterns"]["go_around_opponent"] = Action.Right
+        
         # if top right direction is safest
         top_right, opponents_amount = get_average_distance_to_opponents(obs, player_x + 0.01, player_y - 0.01)
-        if (top_right > biggest_distance and player_y > -0.15) or (top_right == 2 and player_y > 0.07):
+        if (top_right > biggest_distance and player_y > -0.35): # or (top_right == 2 and player_y > 0.07):
             biggest_distance = top_right
             final_opponents_amount = opponents_amount
             obs["memory_patterns"]["go_around_opponent"] = Action.TopRight
+            
         # if bottom right direction is safest
         bottom_right, opponents_amount = get_average_distance_to_opponents(obs, player_x + 0.01, player_y + 0.01)
-        if (bottom_right > biggest_distance and player_y < 0.15) or (bottom_right == 2 and player_y < -0.07):
+        if (bottom_right > biggest_distance and player_y < 0.35): # or (bottom_right == 2 and player_y < -0.07):
             biggest_distance = bottom_right
             final_opponents_amount = opponents_amount
             obs["memory_patterns"]["go_around_opponent"] = Action.BottomRight
+        
         # is player is surrounded?
-        if opponents_amount >= 3:
-            obs["memory_patterns"]["go_around_opponent_surrounded"] = True
-        else:
-            obs["memory_patterns"]["go_around_opponent_surrounded"] = False
+        obs["memory_patterns"]["opponent_number"] = final_opponents_amount
+        
+        # find high pass direction
+        get_far_teamate(obs, player_x, player_y)
+#         obs["high_pass_direction"] = None
         return True
         
     def get_action(obs, player_x, player_y):
-        """ get action of this memory pattern """
-        # if player is surrounded
-        if obs["memory_patterns"]["go_around_opponent_surrounded"]:
+        """ get action of this memory pattern """        
+        # >=2人，先长传
+        if obs["memory_patterns"]["opponent_number"] >= 2:
+            if obs["high_pass_direction"] is not None:
+                direction_action =  obs["high_pass_direction"]
+                if direction_action not in obs["sticky_actions"]:
+                    action_to_release = get_active_sticky_action(obs, ["sprint"])
+                    if action_to_release != None:
+                        return action_to_release
+                    return direction_action
             return Action.HighPass
+   
+        # 0人，1人 带球   
         if obs["memory_patterns"]["go_around_opponent"] not in obs["sticky_actions"]:
             action_to_release = get_active_sticky_action(obs, ["sprint"])
             if action_to_release != None:
@@ -259,6 +292,7 @@ def go_through_opponents(obs, player_x, player_y):
         return obs["memory_patterns"]["go_around_opponent"]
     
     return {"environment_fits": environment_fits, "get_action": get_action}
+
 
 ############# 防守 ###############
 def run_to_ball_bottom(obs, player_x, player_y):
@@ -401,29 +435,10 @@ def run_to_ball_top_right(obs, player_x, player_y):
         """ get action of this memory pattern """
         if Action.Sprint not in obs["sticky_actions"]:
             return Action.Sprint
-        return Action.TopRight
-    
-    return {"environment_fits": environment_fits, "get_action": get_action}
-
-def tackle_the_ball(obs, player_x, player_y):
-    """ perform the slide to tackle the ball """
-    def environment_fits(obs, player_x, player_y):
-        """ environment fits constraints """
-        # ball is to the top right from player's position
-        if abs( obs["ball"][0]-player_x) < 0.01 and abs(obs["ball"][1]-player_y) < 0.01:
-            return True
-        return False
-        
-    def get_action(obs, player_x, player_y):
-        """ get action of this memory pattern """
-        if Action.Sprint in obs["sticky_actions"]:
-            return Action.ReleaseSprint
-        return Action.Idle
+        return Action.TopRight  
+    return {"environment_fits": environment_fits, "get_action": get_action}        
      
-    return {"environment_fits": environment_fits, "get_action": get_action}
-
-############# 防守 END ###############
-
+ 
 def idle(obs, player_x, player_y):
     """ do nothing, stickly actions are not affected (player maintains his directional movement etc.) """
     def environment_fits(obs, player_x, player_y):
@@ -445,21 +460,14 @@ def corner(obs, player_x, player_y):
     def environment_fits(obs, player_x, player_y):
         """ environment fits constraints """
         # it is corner game mode
-        if obs['game_mode'] == GameMode.Corner:
+        if high_pass_state or obs['game_mode'] == GameMode.Corner:
             return True
         return False
         
     def get_action(obs, player_x, player_y):
         """ get action of this memory pattern """
-        action_to_release = get_active_sticky_action(obs, ["top", "bottom"])
-        if action_to_release != None:
-            return action_to_release
-        if Action.Top not in obs["sticky_actions"] and Action.Bottom not in obs["sticky_actions"]:
-            if player_y > 0:
-                return Action.Top
-            else:
-                return Action.Bottom
-        return Action.HighPass
+        action = high_pass_action(obs, player_x, player_y)
+        return action
     
     return {"environment_fits": environment_fits, "get_action": get_action}
 
@@ -587,26 +595,58 @@ def throw_in(obs, player_x, player_y):
     
     return {"environment_fits": environment_fits, "get_action": get_action}
 
+
 ############# 找patterns ###############
+
+# 进攻
+def offence_memory_patterns(obs, player_x, player_y):
+    """ group of memory patterns for environments in which player's team has the ball """
+    def environment_fits(obs, player_x, player_y):
+        """ environment fits constraints """
+        # player ownes the ball or very close to the ball when opponent doesnt have the ball
+        distance_to_ball = get_distance(player_x, player_y, obs["ball"][0], obs["ball"][1])
+        if (obs["ball_owned_team"] == 0) or (obs["ball_owned_team"] != 1 and ( high_pass_state or distance_to_ball < 0.03) ): 
+            return True
+        return False
+        
+    def get_memory_patterns(obs, player_x, player_y):
+        """ get list of memory patterns """
+        memory_patterns = [
+            bad_angle_high_pass, # 下底传中
+            close_to_goalkeeper_shot, # 射门
+            far_from_goal_shot, # 解围
+            go_through_opponents, # 过人
+            idle
+        ]
+        return memory_patterns
+ 
+    return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
+
+# 防守
 def defence_memory_patterns(obs, player_x, player_y):
     """ group of memory patterns for environments in which opponent's team has the ball """
     def environment_fits(obs, player_x, player_y):
         """ environment fits constraints """
         # player don't have the ball
-        if obs["ball_owned_team"] != 0:
+        if obs["ball_owned_team"] != 0 :
             return True
         return False
         
     def get_memory_patterns(obs, player_x, player_y):
         """ get list of memory patterns """
         
-#         # Notice: WHY
+#         # Notice: 为了更加保守
 #         # shift ball x position, if opponent has the ball
 #         if obs["ball_owned_team"] == 1:
-#             obs["memory_patterns"]["ball_next_coords"]["x"] -= 0.05
-            
+#             obs["memory_patterns"]["ball_next_coords"]["x"] -= 0.05   
+
+        if abs(player_x - obs["ball"][0]) < 0.05 and abs(player_y - obs["ball"][1]) < 0.05:
+            obs["memory_patterns"]["ball_next_coords"] = {
+                    "x": obs["ball"][0] + obs["ball_direction"][0] * 1,
+                    "y": obs["ball"][1] + obs["ball_direction"][1] * 0.2
+           }
+        
         memory_patterns = [
-            tackle_the_ball,
             run_to_ball_right,
             run_to_ball_left,
             run_to_ball_bottom,
@@ -621,65 +661,7 @@ def defence_memory_patterns(obs, player_x, player_y):
         
     return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
 
-def goalkeeper_memory_patterns(obs, player_x, player_y):
-    """ group of memory patterns for goalkeeper """
-    def environment_fits(obs, player_x, player_y):
-        """ environment fits constraints """
-        # player is a goalkeeper have the ball
-        if (obs["ball_owned_player"] == obs["active"] and
-                obs["ball_owned_team"] == 0 and
-                obs["ball_owned_player"] == 0):
-            return True
-        return False
-        
-    def get_memory_patterns(obs, player_x, player_y):
-        """ get list of memory patterns """
-        memory_patterns = [
-            far_from_goal_shot,
-            idle
-        ]
-        return memory_patterns
-        
-    return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
-
-def offence_memory_patterns(obs, player_x, player_y):
-    """ group of memory patterns for environments in which player's team has the ball """
-    def environment_fits(obs, player_x, player_y):
-        """ environment fits constraints """
-        # player have the ball
-        if obs["ball_owned_player"] == obs["active"] and obs["ball_owned_team"] == 0:
-            return True
-        return False
-        
-    def get_memory_patterns(obs, player_x, player_y):
-        """ get list of memory patterns """
-        memory_patterns = [
-            far_from_goal_shot,
-            far_from_goal_high_pass,
-            bad_angle_high_pass,
-            close_to_goalkeeper_shot,
-            go_through_opponents,
-            idle
-        ]
-        return memory_patterns
-        
-    return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
-
-def other_memory_patterns(obs, player_x, player_y):
-    """ group of memory patterns for all other environments """
-    def environment_fits(obs, player_x, player_y):
-        """ environment fits constraints """
-        return True
-        
-    def get_memory_patterns(obs, player_x, player_y):
-        """ get list of memory patterns """
-        memory_patterns = [
-            idle
-        ]
-        return memory_patterns
-        
-    return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
-
+# 特殊
 def special_game_modes_memory_patterns(obs, player_x, player_y):
     """ group of memory patterns for special game mode environments """
     def environment_fits(obs, player_x, player_y):
@@ -703,6 +685,47 @@ def special_game_modes_memory_patterns(obs, player_x, player_y):
         return memory_patterns
         
     return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
+
+# 门将解围
+def goalkeeper_memory_patterns(obs, player_x, player_y):
+    """ group of memory patterns for goalkeeper """
+    def environment_fits(obs, player_x, player_y):
+        """ environment fits constraints """
+        # player is a goalkeeper have the ball
+        if (obs["ball_owned_player"] == obs["active"] and
+                obs["ball_owned_team"] == 0 and
+                obs["ball_owned_player"] == 0):
+            return True
+        return False
+        
+    def get_memory_patterns(obs, player_x, player_y):
+        """ get list of memory patterns """
+        memory_patterns = [
+            far_from_goal_shot,
+            idle
+        ]
+        return memory_patterns
+        
+    return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
+
+
+# 兜底
+def other_memory_patterns(obs, player_x, player_y):
+    """ group of memory patterns for all other environments """
+    def environment_fits(obs, player_x, player_y):
+        """ environment fits constraints """
+        return True
+        
+    def get_memory_patterns(obs, player_x, player_y):
+        """ get list of memory patterns """
+        memory_patterns = [
+            idle
+        ]
+        return memory_patterns
+        
+    return {"environment_fits": environment_fits, "get_memory_patterns": get_memory_patterns}
+
+
 
 ############# 按照角色分类 ###############
 ############# 特殊/守门员/进攻/防守/其他 ###############
@@ -750,10 +773,12 @@ def agent(raw_obs):
     """ Ole ole ole ole """
     # rule observation
     obs = human_readable_obs(raw_obs)
-    # rl observation
-    rl_obs = transform_obs(raw_obs)
-    obs["rl_obs"] = rl_obs
-    
+    # raw observation
+    obs["raw_obs"] = raw_obs
+
+    # 球已经被抢断了
+    global high_pass_state
+    if high_pass_state and obs["ball_owned_team"] == 1 : high_pass_state = False
     # shift positions of opponent team players
     for i in range(len(obs["right_team"])):
         obs["right_team"][i][0] += obs["right_team_direction"][i][0]

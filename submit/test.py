@@ -6,7 +6,7 @@ os.environ['CUDA_DEVCIE_ORDER'] = "PCR_BUS_ID"
 os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
 
 from stable_baselines3 import PPO
-from env_wrapper import GFootballEnv
+from football_env import GFootballEnv
 
 
 # LEVEL = "academy_empty_goal_close"
